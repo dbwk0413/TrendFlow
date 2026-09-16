@@ -1,0 +1,2 @@
+[functions.analyze-trend]
+verify_jwt = false

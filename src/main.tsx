@@ -7,12 +7,6 @@ function normalizeEnvValue(
   variableName: string
 ) {
   let normalized = String(value ?? "");
-
-  /*
-   * Vercel에 실수로
-   * VITE_SUPABASE_...=값
-   * 전체를 붙여 넣은 경우도 자동 보정
-   */
   const prefix = `${variableName}=`;
 
   normalized = normalized.trim();
@@ -21,9 +15,6 @@ function normalizeEnvValue(
     normalized = normalized.slice(prefix.length);
   }
 
-  /*
-   * 앞뒤 따옴표 제거
-   */
   if (
     (normalized.startsWith('"') &&
       normalized.endsWith('"')) ||
@@ -33,19 +24,9 @@ function normalizeEnvValue(
     normalized = normalized.slice(1, -1);
   }
 
-  /*
-   * HTTP Header에서 허용되지 않는
-   * 줄바꿈 / 탭 / 제어문자 제거
-   *
-   * production에서 발생한
-   * "Failed to execute 'fetch' ... Invalid value"
-   * 방지용
-   */
-  normalized = normalized
+  return normalized
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
     .trim();
-
-  return normalized;
 }
 
 const supabaseUrl = normalizeEnvValue(
@@ -53,14 +34,9 @@ const supabaseUrl = normalizeEnvValue(
   "VITE_SUPABASE_URL"
 ).replace(/\/+$/, "");
 
-const supabaseKey = normalizeEnvValue(
-  import.meta.env.VITE_SUPABASE_ANON_KEY,
-  "VITE_SUPABASE_ANON_KEY"
-);
-
-if (!supabaseUrl || !supabaseKey) {
+if (!supabaseUrl) {
   throw new Error(
-    "Supabase 환경변수가 없습니다. VITE_SUPABASE_URL과 VITE_SUPABASE_ANON_KEY를 확인하세요."
+    "VITE_SUPABASE_URL 환경변수가 없습니다."
   );
 }
 
@@ -70,68 +46,6 @@ if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(supabaseUrl)) {
   );
 }
 
-/*
- * 키 내용 자체는 노출하지 않고
- * 브라우저 fetch가 받을 수 없는 문자가 남아 있는지만 확인
- */
-if (/[^\x20-\x7E]/.test(supabaseKey)) {
-  throw new Error(
-    "VITE_SUPABASE_ANON_KEY에 사용할 수 없는 문자가 포함되어 있습니다."
-  );
-}
-
-type Article = {
-  id?: number;
-  title: string;
-  description?: string;
-  link?: string;
-  originallink?: string;
-  pubDate?: string;
-};
-
-type TrendPoint = {
-  period: string;
-  ratio: number;
-};
-
-type Interest = {
-  keyword: string;
-  reason: string;
-
-  searchKeywords?: string[];
-
-  articleIds?: number[];
-  articleCount?: number;
-
-  trend?: {
-    change?: number;
-    previousAverage?: number;
-    recentAverage?: number;
-    data?: TrendPoint[];
-  };
-
-  semantic?: {
-    topicSimilarity?: number;
-    evidenceSimilarity?: number;
-    score?: number;
-  };
-
-  signal?: {
-    score?: number;
-    semanticComponent?: number;
-    trendComponent?: number;
-    evidenceComponent?: number;
-  };
-};
-
-type AnalyzeResponse = {
-  ok: boolean;
-  query?: string;
-  total?: number;
-  articles?: Article[];
-  interests?: Interest[];
-  error?: string;
-};
 
 function cleanText(text?: string) {
   if (!text) return "";
@@ -317,36 +231,9 @@ function App() {
         {
           method: "POST",
 
-          headers: (() => {
-            const headers = new Headers();
-
-            headers.set(
-              "Content-Type",
-              "application/json"
-            );
-
-            try {
-              /*
-               * Supabase의 publishable/anon API key는
-               * apikey 헤더로 전달합니다.
-               *
-               * 브라우저에 로그인한 사용자 JWT가 없는
-               * 현재 TrendFlow 구조에서는
-               * publishable key를 Authorization Bearer로
-               * 중복 전달하지 않습니다.
-               */
-              headers.set(
-                "apikey",
-                supabaseKey
-              );
-            } catch {
-              throw new Error(
-                "Vercel의 VITE_SUPABASE_ANON_KEY 값 형식이 올바르지 않습니다. 로컬 .env의 키 값만 다시 등록해 주세요."
-              );
-            }
-
-            return headers;
-          })(),
+          headers: {
+            "Content-Type": "application/json",
+          },
 
           body: JSON.stringify({
             query: keyword,
@@ -370,7 +257,7 @@ function App() {
         if (!response.ok) {
           throw new Error(
             parsedData?.error ||
-            `Edge Function 요청 실패 (${response.status})`
+              `Edge Function 요청 실패 (${response.status})`
           );
         }
 
@@ -405,7 +292,7 @@ function App() {
       if (!data.ok) {
         throw new Error(
           data.error ||
-          "분석 요청에 실패했습니다."
+            "분석 요청에 실패했습니다."
         );
       }
 
@@ -462,7 +349,7 @@ function App() {
         err.message.includes("Invalid value")
       ) {
         setError(
-          "Supabase 요청 헤더를 만들지 못했습니다. Vercel의 VITE_SUPABASE_ANON_KEY를 삭제한 뒤 로컬 .env의 키 값만 다시 등록해 주세요."
+          "Edge Function 요청을 만들지 못했습니다. 배포 설정을 확인해 주세요."
         );
       } else if (err instanceof Error) {
         setError(err.message);

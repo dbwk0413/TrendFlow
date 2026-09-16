@@ -317,11 +317,36 @@ function App() {
         {
           method: "POST",
 
-          headers: {
-            "Content-Type": "application/json",
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
-          },
+          headers: (() => {
+            const headers = new Headers();
+
+            headers.set(
+              "Content-Type",
+              "application/json"
+            );
+
+            try {
+              /*
+               * Supabase의 publishable/anon API key는
+               * apikey 헤더로 전달합니다.
+               *
+               * 브라우저에 로그인한 사용자 JWT가 없는
+               * 현재 TrendFlow 구조에서는
+               * publishable key를 Authorization Bearer로
+               * 중복 전달하지 않습니다.
+               */
+              headers.set(
+                "apikey",
+                supabaseKey
+              );
+            } catch {
+              throw new Error(
+                "Vercel의 VITE_SUPABASE_ANON_KEY 값 형식이 올바르지 않습니다. 로컬 .env의 키 값만 다시 등록해 주세요."
+              );
+            }
+
+            return headers;
+          })(),
 
           body: JSON.stringify({
             query: keyword,
@@ -345,7 +370,7 @@ function App() {
         if (!response.ok) {
           throw new Error(
             parsedData?.error ||
-              `Edge Function 요청 실패 (${response.status})`
+            `Edge Function 요청 실패 (${response.status})`
           );
         }
 
@@ -380,7 +405,7 @@ function App() {
       if (!data.ok) {
         throw new Error(
           data.error ||
-            "분석 요청에 실패했습니다."
+          "분석 요청에 실패했습니다."
         );
       }
 
@@ -437,7 +462,7 @@ function App() {
         err.message.includes("Invalid value")
       ) {
         setError(
-          "배포 환경변수 형식이 올바르지 않습니다. Vercel의 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY 값을 다시 확인해 주세요."
+          "Supabase 요청 헤더를 만들지 못했습니다. Vercel의 VITE_SUPABASE_ANON_KEY를 삭제한 뒤 로컬 .env의 키 값만 다시 등록해 주세요."
         );
       } else if (err instanceof Error) {
         setError(err.message);

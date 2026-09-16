@@ -1,0 +1,17 @@
+fetch(
+  "https://hywvovjymjbwaafupoqf.supabase.co/functions/v1/analyze-trend",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      query: "생성형 AI"
+    })
+  }
+)
+  .then(async (r) => {
+    console.log("STATUS:", r.status);
+    console.log("BODY:", await r.text());
+  })
+  .catch((e) => console.error("FETCH ERROR:", e));

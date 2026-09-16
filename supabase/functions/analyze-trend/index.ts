@@ -3,7 +3,9 @@
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-retry-count, traceparent, tracestate, baggage",
+  "Access-Control-Allow-Methods":
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 };
 
 const NAVER_NEWS_URL =
@@ -121,6 +123,31 @@ function cosineSimilarity(a, b) {
    HyperCLOVA JSON Parser
 ========================================================= */
 
+function repairJsonText(text) {
+  let repaired = String(text)
+    .replace(/\uFEFF/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/,\s*([}\]])/g, "$1")
+    .replace(/}\s*{/g, "},{");
+
+  /*
+   * LLM이 객체 속성 사이의 쉼표를 빠뜨린 경우 보정
+   * 예:
+   * "reason": "..."
+   * "articleIds": [1, 2]
+   */
+  for (let i = 0; i < 4; i++) {
+    repaired = repaired.replace(
+      /("|\]|\}|-?\d+(?:\.\d+)?|true|false|null)\s*\n(\s*"[^"\n]+"\s*:)/g,
+      "$1,\n$2"
+    );
+  }
+
+  return repaired;
+}
+
+
 function extractJson(text) {
   const cleaned = String(text)
     .replace(/```json/gi, "")
@@ -135,19 +162,48 @@ function extractJson(text) {
 
   if (
     start === -1 ||
-    end === -1
+    end === -1 ||
+    end < start
   ) {
     throw new Error(
       "HyperCLOVA 응답에서 JSON을 찾지 못했습니다."
     );
   }
 
-  return JSON.parse(
+  const rawJson =
     cleaned.slice(
       start,
       end + 1
-    )
-  );
+    );
+
+  try {
+    return JSON.parse(rawJson);
+  } catch (firstError) {
+    const repairedJson =
+      repairJsonText(rawJson);
+
+    try {
+      return JSON.parse(repairedJson);
+    } catch (secondError) {
+      console.error(
+        "HyperCLOVA 원본 JSON:",
+        rawJson
+      );
+
+      console.error(
+        "HyperCLOVA 보정 JSON:",
+        repairedJson
+      );
+
+      throw new Error(
+        `HyperCLOVA가 올바른 JSON 형식으로 응답하지 않았습니다: ${
+          secondError instanceof Error
+            ? secondError.message
+            : String(secondError)
+        }`
+      );
+    }
+  }
 }
 
 
@@ -255,6 +311,7 @@ Deno.serve(async (req) => {
     return new Response(
       "ok",
       {
+        status: 200,
         headers: corsHeaders,
       }
     );
@@ -524,6 +581,18 @@ articleIds에 입력합니다.
 9.
 반드시 JSON만 반환합니다.
 
+10.
+JSON 문법을 엄격히 지킵니다.
+모든 객체 속성과 배열 항목 사이에는 쉼표를 넣고,
+문자열은 큰따옴표로 감싸며,
+문자열 내부의 큰따옴표가 필요하면 반드시 이스케이프합니다.
+
+11.
+마크다운 코드블록, 설명 문장, 주석은 절대 출력하지 않습니다.
+
+12.
+응답을 보내기 전에 JSON.parse가 가능한 형태인지 스스로 점검합니다.
+
 형식:
 
 {
@@ -592,7 +661,7 @@ ${articleText}
             topP: 0.8,
             topK: 0,
 
-            maxTokens: 1600,
+            maxTokens: 2400,
 
             temperature: 0.2,
 

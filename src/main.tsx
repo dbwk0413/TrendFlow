@@ -1,18 +1,22 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { createClient } from "@supabase/supabase-js";
 import "./style.css";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = String(
+  import.meta.env.VITE_SUPABASE_URL ?? ""
+)
+  .trim()
+  .replace(/\/+$/, "");
+
+const supabaseKey = String(
+  import.meta.env.VITE_SUPABASE_ANON_KEY ?? ""
+).trim();
 
 if (!supabaseUrl || !supabaseKey) {
   throw new Error(
-    "Supabase 환경변수가 없습니다. .env의 VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY를 확인하세요."
+    "Supabase 환경변수가 없습니다. VITE_SUPABASE_URL과 VITE_SUPABASE_ANON_KEY를 확인하세요."
   );
 }
-
-const supabase = createClient(supabaseUrl, supabaseKey);
 
 type Article = {
   id?: number;
@@ -246,15 +250,45 @@ function App() {
       /*
        * 실제 Supabase 분석 요청
        */
-      const requestPromise =
-        supabase.functions.invoke<AnalyzeResponse>(
-          "analyze-trend",
-          {
-            body: {
-              query: keyword,
-            },
-          }
-        );
+      const requestPromise = fetch(
+        `${supabaseUrl}/functions/v1/analyze-trend`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+
+          body: JSON.stringify({
+            query: keyword,
+          }),
+        }
+      ).then(async (response) => {
+        const responseText =
+          await response.text();
+
+        let parsedData: AnalyzeResponse;
+
+        try {
+          parsedData =
+            JSON.parse(responseText);
+        } catch {
+          throw new Error(
+            `서버 응답을 읽지 못했습니다. (${response.status})`
+          );
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            parsedData?.error ||
+              `Edge Function 요청 실패 (${response.status})`
+          );
+        }
+
+        return parsedData;
+      });
 
       /*
        * 서버가 너무 빨리 끝나도
@@ -269,21 +303,11 @@ function App() {
           );
         });
 
-      const [
-        {
-          data,
-          error: invokeError,
-        },
-      ] = await Promise.all([
-        requestPromise,
-        minimumLoadingTime,
-      ]);
-
-      if (invokeError) {
-        throw new Error(
-          invokeError.message
-        );
-      }
+      const [data] =
+        await Promise.all([
+          requestPromise,
+          minimumLoadingTime,
+        ]);
 
       if (!data) {
         throw new Error(
@@ -294,7 +318,7 @@ function App() {
       if (!data.ok) {
         throw new Error(
           data.error ||
-          "분석 요청에 실패했습니다."
+            "분석 요청에 실패했습니다."
         );
       }
 

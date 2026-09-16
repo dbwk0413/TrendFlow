@@ -2,19 +2,81 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
-const supabaseUrl = String(
-  import.meta.env.VITE_SUPABASE_URL ?? ""
-)
-  .trim()
-  .replace(/\/+$/, "");
+function normalizeEnvValue(
+  value: unknown,
+  variableName: string
+) {
+  let normalized = String(value ?? "");
 
-const supabaseKey = String(
-  import.meta.env.VITE_SUPABASE_ANON_KEY ?? ""
-).trim();
+  /*
+   * Vercel에 실수로
+   * VITE_SUPABASE_...=값
+   * 전체를 붙여 넣은 경우도 자동 보정
+   */
+  const prefix = `${variableName}=`;
+
+  normalized = normalized.trim();
+
+  if (normalized.startsWith(prefix)) {
+    normalized = normalized.slice(prefix.length);
+  }
+
+  /*
+   * 앞뒤 따옴표 제거
+   */
+  if (
+    (normalized.startsWith('"') &&
+      normalized.endsWith('"')) ||
+    (normalized.startsWith("'") &&
+      normalized.endsWith("'"))
+  ) {
+    normalized = normalized.slice(1, -1);
+  }
+
+  /*
+   * HTTP Header에서 허용되지 않는
+   * 줄바꿈 / 탭 / 제어문자 제거
+   *
+   * production에서 발생한
+   * "Failed to execute 'fetch' ... Invalid value"
+   * 방지용
+   */
+  normalized = normalized
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+    .trim();
+
+  return normalized;
+}
+
+const supabaseUrl = normalizeEnvValue(
+  import.meta.env.VITE_SUPABASE_URL,
+  "VITE_SUPABASE_URL"
+).replace(/\/+$/, "");
+
+const supabaseKey = normalizeEnvValue(
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  "VITE_SUPABASE_ANON_KEY"
+);
 
 if (!supabaseUrl || !supabaseKey) {
   throw new Error(
     "Supabase 환경변수가 없습니다. VITE_SUPABASE_URL과 VITE_SUPABASE_ANON_KEY를 확인하세요."
+  );
+}
+
+if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(supabaseUrl)) {
+  throw new Error(
+    "VITE_SUPABASE_URL 형식이 올바르지 않습니다."
+  );
+}
+
+/*
+ * 키 내용 자체는 노출하지 않고
+ * 브라우저 fetch가 받을 수 없는 문자가 남아 있는지만 확인
+ */
+if (/[^\x20-\x7E]/.test(supabaseKey)) {
+  throw new Error(
+    "VITE_SUPABASE_ANON_KEY에 사용할 수 없는 문자가 포함되어 있습니다."
   );
 }
 
@@ -370,7 +432,14 @@ function App() {
 
       console.error(err);
 
-      if (err instanceof Error) {
+      if (
+        err instanceof TypeError &&
+        err.message.includes("Invalid value")
+      ) {
+        setError(
+          "배포 환경변수 형식이 올바르지 않습니다. Vercel의 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY 값을 다시 확인해 주세요."
+        );
+      } else if (err instanceof Error) {
         setError(err.message);
       } else {
         setError(
